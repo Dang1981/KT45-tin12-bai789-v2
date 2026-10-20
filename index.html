@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hệ Thống Kiểm Tra Trực Tuyến - THPT Bình Tân</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <!-- Nhúng file dùng chung -->
+  <script src="shared.js"></script>
+  <style>
+    body {
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+      user-select: none;
+    }
+    @media print {
+      body { background: white !important; color: black !important; padding: 0 !important; }
+      .no-print { display: none !important; }
+      .print-only { display: block !important; }
+      .page-break { page-break-before: always; }
+    }
+    .print-only { display: none; }
+    .bubble {
+      width: 18px; height: 18px; border: 1.5px solid #1e293b; border-radius: 9999px;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: bold; margin: 0 2px;
+    }
+    .bubble.filled { background-color: #0f172a !important; color: white !important; }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen" oncontextmenu="return false;">
+
+  <!-- MÀN HÌNH BÁO ĐỘNG VI PHẠM RỜI PHÒNG THI -->
+  <div id="violationAlertBox" class="hidden fixed inset-0 z-[100] bg-rose-950/95 flex flex-col items-center justify-center text-white text-center p-6 backdrop-blur-sm">
+    <div class="text-6xl mb-3 animate-bounce">⚠️</div>
+    <h2 class="text-2xl font-black uppercase text-rose-300">CẢNH BÁO VI PHẠM RỜI PHÒNG THI!</h2>
+    <p class="text-sm sm:text-base mt-2 max-w-md">Em vừa chuyển tab hoặc thu nhỏ cửa sổ làm bài[cite: 1]. Hệ thống đã tự động <strong class="text-amber-300">TRỪ 0.5 ĐIỂM</strong> và báo động về máy giám khảo![cite: 1]</p>
+    <p id="violationCountText" class="text-xs sm:text-sm font-mono mt-3 text-rose-200 bg-rose-900/80 px-4 py-1.5 rounded-lg border border-rose-700">Số lần vi phạm: 1/3 (Đã bị trừ 0.5 điểm)[cite: 1]</p>
+    <button onclick="dismissViolationAlert()" class="mt-6 px-6 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-lg transition">
+      Quay lại làm bài thi ngay[cite: 1]
+    </button>
+  </div>
+
+  <!-- HỘP NHẮC NHỞ TRỰC TIẾP TỪ THẦY CÔ -->
+  <div id="teacherNoticeBox" class="hidden fixed inset-0 z-[110] bg-indigo-950/90 flex flex-col items-center justify-center text-white text-center p-6 backdrop-blur-sm">
+    <div class="text-5xl mb-2">🔔</div>
+    <h2 class="text-xl font-black uppercase text-amber-300">LỜI NHẮC TỪ GIÁM THỊ</h2>
+    <p id="teacherNoticeContent" class="text-sm sm:text-base mt-3 max-w-md bg-indigo-900/80 p-4 rounded-xl border border-indigo-700 font-semibold"></p>
+    <button onclick="document.getElementById('teacherNoticeBox').classList.add('hidden')" class="mt-5 px-6 py-2 bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold rounded-lg transition">
+      Đã hiểu và tiếp tục làm bài
+    </button>
+  </div>
+
+  <!-- CAMERA GÓC PHẢI TRÊN (QVGA TIẾT KIỆM BĂNG THÔNG) -->
+  <div id="camBox" class="no-print fixed top-3 right-3 z-50 bg-slate-900 border-2 border-indigo-500 rounded-xl shadow-2xl p-1.5 w-44 sm:w-52 flex flex-col items-center">
+    <div class="flex justify-between w-full px-1 mb-1 items-center">
+      <span class="text-[10px] text-emerald-400 font-bold flex items-center gap-1">
+        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> AI-Camera[cite: 1]
+      </span>
+      <span id="violationBadge" class="text-[10px] text-rose-400 font-bold bg-rose-950/80 px-1.5 py-0.2 rounded border border-rose-800">0 lỗi[cite: 1]</span>
+    </div>
+    <video id="localVideo" autoplay muted playsinline class="w-full h-28 bg-black rounded-lg object-cover"></video>
+    <p id="camStatus" class="text-[9px] text-slate-300 mt-1 font-mono text-center">Đang chờ đăng nhập...[cite: 1]</p>
+  </div>
+
+  <!-- PHẦN 1: MÀN HÌNH CHỌN LỚP & HỌC SINH -->
+  <div id="loginScreen" class="no-print max-w-lg mx-auto mt-12 p-6 bg-white rounded-2xl shadow-xl border border-slate-200">
+    <div class="text-center mb-6">
+      <h3 class="text-xs font-bold uppercase tracking-wider text-indigo-700">Trường THPT Bình Tân[cite: 1]</h3>
+      <h2 class="text-lg font-black text-slate-900 mt-1">KIỂM TRA ĐỊNH KỲ TIN HỌC 12[cite: 1]</h2>
+      <p class="text-xs text-slate-500">Chủ đề: Thiết kế web HTML (Bài 7, 8, 9) • Thời gian: 45 phút[cite: 1]</p>
+    </div>
+
+    <form id="startForm" onsubmit="handleStartExam(event)" class="space-y-4">
+      <div>
+        <label class="block text-xs font-bold text-slate-700 mb-1">1. Chọn Lớp học của em:[cite: 1]</label>
+        <select id="inpClass" onchange="autoLoadStudentExcel(this.value)" required class="w-full px-3 py-2 border rounded-lg text-sm font-semibold text-indigo-900 focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-50">
+          <option value="" disabled selected>-- Bấm để chọn lớp học --[cite: 1]</option>
+          <option value="12A3">Lớp 12A3[cite: 1]</option>
+          <option value="12A9">Lớp 12A9[cite: 1]</option>
+          <option value="12A14">Lớp 12A14[cite: 1]</option>
+        </select>
+      </div>
+
+      <div>
+        <div class="flex justify-between items-center mb-1">
+          <label class="block text-xs font-bold text-slate-700">2. Chọn Họ và tên của em:[cite: 1]</label>
+          <span id="excelLoadingStatus" class="text-[10px] text-slate-500 italic">Vui lòng chọn lớp trước[cite: 1]</span>
+        </div>
+        <select id="studentSelect" disabled required class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
+          <option value="" disabled selected>-- Danh sách học sinh sẽ hiện ở đây --[cite: 1]</option>
+        </select>
+      </div>
+
+      <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-[11px] text-amber-800 space-y-1">
+        <p class="font-bold text-rose-700">⚠️ Quy chế phòng thi số hóa nghiêm ngặt:[cite: 1]</p>
+        <p>• Hệ thống sẽ tự động bật <strong>Toàn màn hình (Fullscreen)</strong> khi bắt đầu[cite: 1].</p>
+        <p>• <strong>Khóa sao chép / chuột phải / phím tắt</strong> kiểm tra mã nguồn (F12, Ctrl+U...)[cite: 1].</p>
+        <p>• <strong>Mỗi lần rời tab / thu nhỏ ứng dụng</strong> sẽ bị <strong>TRỪ 0.5 ĐIỂM</strong>[cite: 1].</p>
+        <p>• Vi phạm quá 3 lần sẽ bị tự động khóa bài và nộp điểm hiện tại[cite: 1].</p>
+      </div>
+
+      <button id="btnStart" type="submit" disabled class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold rounded-lg text-sm shadow-md transition flex items-center justify-center gap-2">
+        📷 Bật Camera & Khóa Màn Hình Làm Bài[cite: 1]
+      </button>
+    </form>
+  </div>
+
+  <!-- PHẦN 2: KHU VỰC LÀM BÀI THI -->
+  <main id="examScreen" class="no-print hidden max-w-5xl mx-auto my-6 p-4 sm:p-8 bg-white rounded-2xl shadow-xl border border-slate-200">
+    <header class="flex flex-wrap justify-between items-center border-b pb-4 mb-6">
+      <div>
+        <span class="text-xs text-indigo-700 font-bold uppercase">Bài kiểm tra thực hành & lý thuyết[cite: 1]</span>
+        <h2 id="dispStudentTitle" class="text-base sm:text-lg font-black text-slate-900">Thí sinh: Đang tải...[cite: 1]</h2>
+        <p class="text-xs text-slate-500">Mã đề: <span id="dispExamCode" class="font-mono font-bold text-slate-800">101[cite: 1]</span> • Điểm trừ vi phạm: <strong id="penaltyDisplay" class="text-rose-600">0.0 đ[cite: 1]</strong></p>
+      </div>
+      <div class="text-right">
+        <span class="text-xs text-slate-500 block">Thời gian còn lại[cite: 1]</span>
+        <span id="timerDisplay" class="text-xl sm:text-2xl font-black text-rose-600 font-mono">45:00[cite: 1]</span>
+      </div>
+    </header>
+
+    <form id="examForm" onsubmit="handleSubmitExam(event)">
+      <!-- PHẦN I: TRẮC NGHIỆM -->
+      <section class="mb-8">
+        <div class="bg-indigo-50 border-l-4 border-indigo-600 p-3 mb-4 rounded-r">
+          <h3 class="text-sm font-bold text-indigo-950 uppercase">Phần I: Câu hỏi trắc nghiệm nhiều phương án lựa chọn (4.75 điểm)[cite: 1]</h3>
+          <p class="text-xs text-indigo-800">19 câu hỏi và đáp án đã được xáo trộn ngẫu nhiên (0.25đ/câu)[cite: 1].</p>
+        </div>
+        <div id="part1Container" class="space-y-4"></div>
+      </section>
+
+      <!-- PHẦN II: ĐÚNG / SAI -->
+      <section class="mb-8">
+        <div class="bg-indigo-50 border-l-4 border-indigo-600 p-3 mb-4 rounded-r">
+          <h3 class="text-sm font-bold text-indigo-950 uppercase">Phần II: Câu trắc nghiệm Đúng / Sai (2.0 điểm)[cite: 1]</h3>
+          <p class="text-xs text-indigo-800">Trong mỗi ý a, b, c, d của từng câu, thí sinh chọn Đúng hoặc Sai[cite: 1].</p>
+        </div>
+        <div id="part2Container" class="space-y-4"></div>
+      </section>
+
+      <!-- PHẦN III: THỰC HÀNH TẠO MÃ HTML (TRỰC QUAN & CHẤM ĐIỂM TỰ ĐỘNG) -->
+      <section class="mb-8">
+        <div class="bg-indigo-50 border-l-4 border-indigo-600 p-3 mb-4 rounded-r flex justify-between items-center">
+          <div>
+            <h3 class="text-sm font-bold text-indigo-950 uppercase">Phần III: Bài tập thực hành tạo mã HTML trên máy (3.25 điểm)[cite: 1]</h3>
+            <p class="text-xs text-indigo-800">Gõ mã nguồn HTML bên trái, khung bên phải sẽ hiển thị trực quan kết quả tương ứng[cite: 1].</p>
+          </div>
+          <span class="text-xs font-mono bg-indigo-200 text-indigo-900 px-2.5 py-1 rounded font-bold">Thang: 3.25đ</span>
+        </div>
+
+        <!-- KHUNG ĐỀ BÀI TRỰC QUAN MÔ PHỎNG -->
+        <div class="p-4 bg-slate-900 text-slate-100 rounded-xl mb-4 border border-slate-700">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-amber-400 mb-2">📋 MẪU KẾT QUẢ TRANG WEB CẦN DỰNG (ĐỀ BÀI TRỰC QUAN):</h4>
+          <div class="bg-white text-slate-900 p-4 rounded-lg shadow-inner font-sans border-2 border-dashed border-indigo-400">
+            <h1 class="text-lg font-bold text-center border-b pb-2 mb-2">KẾ HOẠCH HỌC TẬP TUẦN[cite: 1]</h1>
+            <p class="text-xs mb-2">Học sinh cần nắm vững kiến thức <b>HTML cơ bản</b> và <i>thực hành thiết kế bảng</i>[cite: 1].</p>
+            
+            <p class="text-xs font-bold text-indigo-900">Môn học trọng tâm:</p>
+            <ol class="list-decimal list-inside text-xs pl-2 mb-3">
+              <li>Tin học 12[cite: 1]</li>
+              <li>Toán học</li>
+            </ol>
+
+            <table class="w-full text-xs border-collapse border border-slate-800 text-center">
+              <thead>
+                <tr class="bg-slate-200">
+                  <th colspan="2" class="border border-slate-800 p-1 font-bold">Lịch học buổi sáng</th>
+                  <th class="border border-slate-800 p-1 font-bold">Ghi chú</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="border border-slate-800 p-1">Thứ Hai</td>
+                  <td class="border border-slate-800 p-1">Thực hành HTML</td>
+                  <td class="border border-slate-800 p-1">Phòng máy</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-2 italic">* Yêu cầu kỹ thuật: Trang phải có đầy đủ cấu trúc khung HTML, thẻ &lt;h1&gt;, đoạn văn có in đậm/nghiêng, danh sách &lt;ol&gt;, và thẻ bảng &lt;table border="..."&gt; có sử dụng thuộc tính gộp ô (colspan hoặc rowspan)[cite: 1].</p>
+        </div>
+
+        <!-- KHU VỰC GÕ MÃ VÀ XEM TRƯỚC LIVE PREVIEW -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <div class="flex justify-between items-center mb-1">
+              <label class="text-xs font-bold text-slate-700">Khung soạn thảo HTML:</label>
+              <span class="text-[10px] text-slate-500 font-mono">Tự động xem trước</span>
+            </div>
+            <textarea id="practicalCode" oninput="updateLivePreview()" rows="14" required placeholder="<!DOCTYPE html>&#10;<html>&#10;<head>&#10;    <meta charset=&quot;UTF-8&quot;>&#10;    <title>Ke hoach hoc tap</title>&#10;</head>&#10;<body>&#10;    <h1>KE HOACH HOC TAP TUAN</h1>&#10;    <p>Noi dung <b>in dam</b> va <i>in nghieng</i></p>&#10;    ...&#10;</body>&#10;</html>" class="w-full font-mono text-xs p-3 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-900 text-indigo-200 shadow-inner"></textarea>
+          </div>
+
+          <div>
+            <div class="flex justify-between items-center mb-1">
+              <label class="text-xs font-bold text-slate-700">Kết quả chạy thử thời gian thực:</label>
+              <span id="previewTag" class="text-[10px] text-emerald-600 font-bold">● Đang hiển thị trực tiếp</span>
+            </div>
+            <iframe id="livePreviewFrame" class="w-full h-[252px] bg-white border border-slate-300 rounded-lg shadow-inner"></iframe>
+          </div>
+        </div>
+      </section>
+
+      <div class="text-center pt-4 border-t">
+        <button type="submit" class="px-8 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl shadow-lg transition transform hover:-translate-y-0.5">
+          ✅ Nộp Bài Thi & Xem Kết Quả[cite: 1]
+        </button>
+      </div>
+    </form>
+  </main>
+
+  <!-- PHẦN 3: KẾT QUẢ & IN PHIẾU BÀI LÀM -->
+  <div id="resultScreen" class="hidden max-w-3xl mx-auto my-8 p-6 bg-white rounded-2xl shadow-xl border border-slate-200">
+    <div class="no-print text-center mb-6">
+      <div class="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto text-2xl font-bold mb-2">✓</div>
+      <h2 class="text-xl font-black text-slate-900">BÀI THI ĐÃ ĐƯỢC CHẤM TỰ ĐỘNG![cite: 1]</h2>
+      <p class="text-xs text-slate-500">Dữ liệu và điểm số đã được đồng bộ trực tiếp về máy Thầy Đăng[cite: 1].</p>
+
+      <div class="my-4 p-4 bg-slate-50 rounded-xl border grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+        <div>
+          <span class="text-xs text-slate-500 block">Trắc nghiệm</span>
+          <span id="p12ScoreDisplay" class="text-base font-bold text-slate-700">0.0 đ</span>
+        </div>
+        <div class="border-l pl-2">
+          <span class="text-xs text-slate-500 block">Thực hành HTML</span>
+          <span id="practicalScoreDisplay" class="text-base font-bold text-indigo-600">0.0 đ</span>
+        </div>
+        <div class="border-l pl-2">
+          <span class="text-xs text-slate-500 block">Trừ vi phạm</span>
+          <span id="penaltyScoreDisplay" class="text-base font-bold text-rose-600">-0.0 đ[cite: 1]</span>
+        </div>
+        <div class="border-l pl-2">
+          <span class="text-xs text-slate-500 block">Tổng Điểm Nhận</span>
+          <span id="finalScoreDisplay" class="text-2xl font-black text-emerald-600">0.0 đ[cite: 1]</span>
+        </div>
+      </div>
+
+      <!-- Chi tiết điểm bài thực hành -->
+      <div id="practicalAuditBox" class="text-left text-xs bg-slate-50 p-3 rounded-lg border mb-4 font-mono text-slate-700 space-y-1"></div>
+
+      <div class="flex justify-center gap-3">
+        <button onclick="window.print()" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow flex items-center gap-2">
+          🖨️ In Phiếu Trả Lời Chuẩn Bộ GD&ĐT (A4)[cite: 1]
+        </button>
+      </div>
+    </div>
+
+    <!-- MẪU PHIẾU IN ẤN A4 THEO CHUẨN BỘ GD&ĐT -->
+    <div id="ministryPrintSheet" class="print-only p-4 border border-slate-900 font-serif">
+      <div class="text-center border-b-2 border-slate-900 pb-2 mb-3">
+        <h3 class="text-xs uppercase font-bold tracking-wider">SỞ GIÁO DỤC VÀ ĐÀO TẠO TP. HỒ CHÍ MINH - TRƯỜNG THPT BÌNH TÂN[cite: 1]</h3>
+        <h2 class="text-base font-bold uppercase mt-1">PHIẾU TRẢ LỜI TRẮC NGHIỆM & THỰC HÀNH[cite: 1]</h2>
+        <p class="text-[11px] italic">Bài kiểm tra định kỳ 45 phút - Môn: Tin học 12 (HTML Bài 7, 8, 9)[cite: 1]</p>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2 text-xs border p-2 mb-3">
+        <div>Họ và tên học sinh: <strong id="printName">...[cite: 1]</strong></div>
+        <div>Lớp: <strong id="printClass">...[cite: 1]</strong> | STT: <strong id="printSTT">...[cite: 1]</strong></div>
+        <div>Mã đề thi: <strong id="printExamCode">101[cite: 1]</strong></div>
+        <div>Thời gian nộp: <strong id="printSubmitTime">...[cite: 1]</strong></div>
+      </div>
+
+      <div class="border-b-2 border-slate-900 pb-1 mb-2">
+        <h4 class="text-xs font-bold uppercase">I. BẢNG TÔ ĐÁP ÁN TRẮC NGHIỆM (HỌC SINH ĐÃ CHỌN)[cite: 1]</h4>
+      </div>
+      <div id="printBubbleGrid" class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-4"></div>
+
+      <div class="border-b-2 border-slate-900 pb-1 mb-2 mt-4">
+        <h4 class="text-xs font-bold uppercase">II. PHẦN THỰC HÀNH TẠO MÃ HTML TRÊN MÁY (BÀI LÀM CỦA THÍ SINH)[cite: 1]</h4>
+      </div>
+      <pre id="printPracticalCode" class="text-[10px] font-mono p-2 border border-slate-400 bg-slate-50 whitespace-pre-wrap mb-4"></pre>
+
+      <div class="grid grid-cols-2 text-center text-xs mt-6">
+        <div>
+          <p class="font-bold">GIÁM THỊ PHÒNG MÁY[cite: 1]</p>
+          <p class="italic text-[10px]">(Ký và ghi rõ họ tên)[cite: 1]</p>
+        </div>
+        <div>
+          <p class="font-bold">GIÁO VIÊN CHẤM THI[cite: 1]</p>
+          <p class="italic text-[10px]">(Ký và ghi rõ họ tên)[cite: 1]</p>
+          <p class="mt-8 font-bold">Nguyễn Hoàng Hải Đăng[cite: 1]</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // KHÓA PHÍM TẮT DEVTOOLS & CHỐNG SAO CHÉP
+    window.addEventListener('keydown', function (e) {
+      if (e.keyCode === 123) { e.preventDefault(); return false; }
+      if (e.ctrlKey && (e.key === 'u' || e.key === 'U' || e.key === 's' || e.key === 'S' || (e.shiftKey && (e.key === 'I' || e.key === 'i' || e.key === 'C' || e.key === 'c' || e.key === 'J' || e.key === 'j')))) {
+        e.preventDefault(); return false;
+      }
+      if (e.ctrlKey && (e.key === 'c' || e.key === 'C' || e.key === 'v' || e.key === 'V') && e.target.id !== 'practicalCode') {
+        e.preventDefault(); return false;
+      }
+    });
+
+    document.addEventListener('contextmenu', e => e.preventDefault());
+
+    // CẬP NHẬT KẾT QUẢ RENDER HTML THỜI GIAN THỰC (LIVE PREVIEW)
+    function updateLivePreview() {
+      const code = document.getElementById('practicalCode').value;
+      const iframe = document.getElementById('livePreviewFrame');
+      const doc = iframe.contentDocument || iframe.contentWindow.document;
+      doc.open();
+      doc.write(code);
+      doc.close();
+    }
+
+    // THUẬT TOÁN CHẤM ĐIỂM THỰC HÀNH HTML TỰ ĐỘNG CHUẨN XÁC
+    function evaluatePracticalHTML(codeStr) {
+      let score = 0.0;
+      const breakdown = [];
+
+      if (!codeStr || codeStr.trim().length === 0) {
+        return { score: 0, breakdown: ["Chưa nhập nội dung bài thực hành"] };
+      }
+
+      const lower = codeStr.toLowerCase();
+      const parser = new DOMParser();
+      const parsedDoc = parser.parseFromString(codeStr, 'text/html');
+
+      // 1. Cấu trúc khung chuẩn HTML (0.50 đ)
+      const hasDoctype = lower.includes('<!doctype html>');
+      const hasHead = parsedDoc.querySelector('head') !== null;
+      const hasBody = parsedDoc.querySelector('body') !== null;
+      const hasTitle = parsedDoc.querySelector('title') !== null;
+      if ((hasDoctype || lower.includes('<html')) && hasHead && hasBody && hasTitle) {
+        score += 0.50;
+        breakdown.push("✓ Cấu trúc chuẩn HTML/Head/Title/Body: +0.50đ");
+      } else {
+        breakdown.push("✗ Thiếu thẻ khung chuẩn (html/head/title/body): 0.0đ");
+      }
+
+      // 2. Thẻ tiêu đề h1 (0.50 đ)
+      const h1El = parsedDoc.querySelector('h1');
+      if (h1El && h1El.textContent.trim().length > 0) {
+        score += 0.50;
+        breakdown.push("✓ Tiêu đề <h1> hợp lệ: +0.50đ");
+      } else {
+        breakdown.push("✗ Thiếu tiêu đề <h1> hoặc nội dung rỗng: 0.0đ");
+      }
+
+      // 3. Đoạn văn có in đậm / in nghiêng (0.50 đ)
+      const pEl = parsedDoc.querySelector('p');
+      const hasBold = parsedDoc.querySelector('b, strong') !== null;
+      const hasItalic = parsedDoc.querySelector('i, em') !== null;
+      if (pEl && (hasBold || hasItalic)) {
+        score += 0.50;
+        breakdown.push("✓ Đoạn văn <p> kèm in đậm/nghiêng: +0.50đ");
+      } else {
+        breakdown.push("✗ Thiếu thẻ <p> hoặc thiếu định dạng b/strong/i/em: 0.0đ");
+      }
+
+      // 4. Danh sách có thứ tự <ol> và <li> (0.50 đ)
+      const olEl = parsedDoc.querySelector('ol');
+      const liEls = parsedDoc.querySelectorAll('ol li');
+      if (olEl && liEls.length >= 2) {
+        score += 0.50;
+        breakdown.push("✓ Danh sách có thứ tự <ol> với các mục <li>: +0.50đ");
+      } else {
+        breakdown.push("✗ Thiếu thẻ <ol> hoặc có ít hơn 2 mục <li>: 0.0đ");
+      }
+
+      // 5. Thẻ bảng <table> có thuộc tính border (0.50 đ)
+      const tableEl = parsedDoc.querySelector('table');
+      const hasBorder = tableEl && (tableEl.hasAttribute('border') || lower.includes('border='));
+      if (tableEl && hasBorder) {
+        score += 0.50;
+        breakdown.push("✓ Thẻ bảng <table> có thuộc tính border: +0.50đ");
+      } else {
+        breakdown.push("✗ Bảng <table> thiếu thuộc tính border: 0.0đ");
+      }
+
+      // 6. Gộp ô bảng chuẩn (colspan hoặc rowspan) (0.75 đ)
+      const hasColspan = parsedDoc.querySelector('th[colspan], td[colspan]') !== null || lower.includes('colspan');
+      const hasRowspan = parsedDoc.querySelector('th[rowspan], td[rowspan]') !== null || lower.includes('rowspan');
+      if (tableEl && (hasColspan || hasRowspan)) {
+        score += 0.75;
+        breakdown.push("✓ Bảng có kỹ thuật gộp ô (colspan/rowspan): +0.75đ");
+      } else {
+        breakdown.push("✗ Chưa sử dụng colspan hoặc rowspan trong bảng: 0.0đ");
+      }
+
+      return { score: Math.min(3.25, score), breakdown };
+    }
+
+    const RAW_PART1 = [
+      { q: "Tệp mã nguồn HTML được lưu trữ chuẩn với phần mở rộng nào sau đây?[cite: 1]", opts: [".html hoặc .htm[cite: 1]", ".doc hoặc .docx[cite: 1]", ".txt hoặc .dat[cite: 1]", ".css hoặc .js[cite: 1]"], ans: 0 },
+      { q: "Toàn bộ nội dung hiển thị trực quan của trang web trên trình duyệt được đặt bên trong cặp thẻ nào?[cite: 1]", opts: ["<body> ... </body>[cite: 1]", "<head> ... </head>[cite: 1]", "<title> ... </title>[cite: 1]", "<meta> ... </meta>[cite: 1]"], ans: 0 },
+      { q: "Cặp thẻ nào dùng để đặt tên tiêu đề hiển thị trên thanh tab của trình duyệt web?[cite: 1]", opts: ["<title> ... </title>[cite: 1]", "<header> ... </header>[cite: 1]", "<h1> ... </h1>[cite: 1]", "<caption> ... </caption>[cite: 1]"], ans: 0 },
+      { q: "Thẻ <meta charset=\"UTF-8\"> đặt trong phần <head> có vai trò gì?[cite: 1]", opts: ["Khai báo bộ mã hiển thị chính xác các ký tự tiếng Việt[cite: 1]", "Đặt mật khẩu bảo vệ trang web[cite: 1]", "Tạo hiệu ứng chuyển động trang web[cite: 1]", "Tự động tải lại trang sau 5 giây[cite: 1]"], ans: 0 },
+      { q: "Trong các thẻ sau, thẻ nào là thẻ đơn (thẻ rỗng, không có thẻ đóng)?[cite: 1]", opts: ["<br>[cite: 1]", "<p>[cite: 1]", "<b>[cite: 1]", "<title>[cite: 1]"], ans: 0 },
+      { q: "Đoạn mã HTML nào sau đây tuân thủ đúng quy tắc cấu trúc phân cấp cây chuẩn?[cite: 1]", opts: ["<!DOCTYPE html><html><head><title>A</title></head><body><h1>Chào</h1></body></html>", "<html><head><body></head></body></html>[cite: 1]", "<html><body><head><title>A</title></head></body></html>", "<body><head><title>A</title></head></body>[cite: 1]"], ans: 0 },
+      { q: "Trong các thẻ tiêu đề từ <h1> đến <h6>, thẻ nào quy định cỡ chữ lớn nhất và mức độ ưu tiên cao nhất?[cite: 1]", opts: ["<h1>[cite: 1]", "<h6>[cite: 1]", "<h4>[cite: 1]", "<h2>[cite: 1]"], ans: 0 },
+      { q: "Thẻ nào dùng để ngắt dòng văn bản mà không tạo thành đoạn văn mới?[cite: 1]", opts: ["<br>[cite: 1]", "<p>[cite: 1]", "<hr>[cite: 1]", "<pre>[cite: 1]"], ans: 0 },
+      { q: "Để tạo một đoạn văn bản cơ bản trong HTML, ta sử dụng cặp thẻ nào?[cite: 1]", opts: ["<p> ... </p>[cite: 1]", "<text> ... </text>[cite: 1]", "<para> ... </para>[cite: 1]", "<div> ... </div>[cite: 1]"], ans: 0 },
+      { q: "Điểm khác biệt căn bản về mặt ngữ nghĩa giữa cặp thẻ <strong> và <b> là gì?[cite: 1]", opts: ["<strong> nhấn mạnh ngữ nghĩa quan trọng, <b> chỉ in đậm trực quan", "<strong> chỉ in nghiêng, <b> in đậm[cite: 1]", "<b> nhấn mạnh ngữ nghĩa, <strong> chỉ in đậm[cite: 1]", "Hai thẻ giống hệt nhau về mọi mặt"], ans: 0 },
+      { q: "Để hiển thị công thức hóa học của nước là H₂O (số 2 viết dưới), đoạn mã HTML nào đúng?[cite: 1]", opts: ["H<sub>2</sub>O[cite: 1]", "H<sup>2</sup>O[cite: 1]", "H<down>2</down>O[cite: 1]", "H<small>2</small>O[cite: 1]"], ans: 0 },
+      { q: "Đoạn mã HTML nào sau đây định dạng cụm từ vừa in đậm vừa in nghiêng chuẩn lồng thẻ?[cite: 1]", opts: ["<b><i>Tin học 12</i></b>[cite: 1]", "<b><i>Tin học 12</b></i>[cite: 1]", "<b><i>Tin học 12</b>[cite: 1]", "<bold><italic>Tin học 12</italic></bold>[cite: 1]"], ans: 0 },
+      { q: "Cặp thẻ nào dùng để tạo danh sách không có thứ tự (danh sách dấu đầu dòng)?[cite: 1]", opts: ["<ul> ... </ul>[cite: 1]", "<ol> ... </ol>[cite: 1]", "<li> ... </li>[cite: 1]", "<dl> ... </dl>[cite: 1]"], ans: 0 },
+      { q: "Thẻ nào đại diện cho mỗi mục phần tử nằm bên trong danh sách <ul> hoặc <ol>?[cite: 1]", opts: ["<li>[cite: 1]", "<item>[cite: 1]", "<list>[cite: 1]", "<dt>[cite: 1]"], ans: 0 },
+      { q: "Thẻ nào dùng để định nghĩa một hàng (dòng) trong bảng HTML?[cite: 1]", opts: ["<tr>[cite: 1]", "<table>[cite: 1]", "<td>[cite: 1]", "<th>[cite: 1]"], ans: 0 },
+      { q: "Điểm khác biệt mặc định giữa ô tiêu đề <th> và ô dữ liệu <td> trong bảng là gì?[cite: 1]", opts: ["<th> chữ in đậm căn giữa; <td> chữ thường căn trái[cite: 1]", "<th> chữ thường căn trái; <td> chữ đậm căn giữa[cite: 1]", "<th> nền đen; <td> nền trắng", "<th> chỉ đặt ở dòng cuối"], ans: 0 },
+      { q: "Trong thẻ <table>, thuộc tính border=\"1\" có tác dụng gì?[cite: 1]", opts: ["Quy định độ dày đường viền bảng là 1 pixel[cite: 1]", "Giới hạn bảng chỉ có tối đa 1 dòng[cite: 1]", "Giới hạn bảng chỉ có tối đa 1 cột[cite: 1]", "Tự động đổi màu bảng sang màu đen[cite: 1]"], ans: 0 },
+      { q: "Khi thiết kế bảng, nếu muốn một ô tiêu đề gộp ngang chiếm 3 cột thì dùng thuộc tính nào?[cite: 1]", opts: ["colspan=\"3\"[cite: 1]", "rowspan=\"3\"[cite: 1]", "span=\"3\"[cite: 1]", "merge=\"3\"[cite: 1]"], ans: 0 },
+      { q: "Bảng có 4 cột, tại hàng thứ nhất có 1 ô dùng colspan=\"2\", hàng đó cần thêm mấy ô <td> nữa để bảng không bị xô lệch?[cite: 1]", opts: ["Cần thêm 2 ô[cite: 1]", "Cần thêm 1 ô[cite: 1]", "Cần thêm 3 ô[cite: 1]", "Không cần thêm[cite: 1]"], ans: 0 }
+    ];
+
+    const RAW_PART2 = [
+      {
+        code: `<!DOCTYPE html>\n<html>\n<head><title>Trường THPT Bình Tân</title></head>\n<body>\n  <h1>Tin học 12</h1>\n  <p>Học lập trình <b><i>HTML cơ bản</i></b> rất thú vị!</p>\n</body>\n</html>`,
+        subQ: [
+          { text: "Đoạn mã trên đã có đầy đủ cấu trúc khung tối thiểu chuẩn của một tài liệu HTML.[cite: 1]", ans: true },
+          { text: "Nội dung 'Trường THPT Bình Tân' sẽ xuất hiện trực tiếp ngay đầu trang bên trong vùng hiển thị nội dung trang web.[cite: 1]", ans: false },
+          { text: "Thẻ <h1> làm cho dòng chữ 'Tin học 12' có kích thước chữ to và đậm nhất so với các thẻ từ <h2> đến <h6>.[cite: 1]", ans: true },
+          { text: "Cụm từ 'HTML cơ bản' sẽ được trình duyệt hiển thị vừa in đậm, vừa in nghiêng.[cite: 1]", ans: true }
+        ]
+      },
+      {
+        code: `<table border="1">\n  <tr><th colspan="2">Buổi sáng</th></tr>\n  <tr><td>Tiết 1</td><td>Tin học</td></tr>\n</table>`,
+        subQ: [
+          { text: "Bảng được định nghĩa ở trên có tổng cộng 2 hàng (sử dụng 2 cặp thẻ <tr>).[cite: 1]", ans: true },
+          { text: "Thuộc tính colspan='2' làm cho ô tiêu đề 'Buổi sáng' gộp ngang chiếm độ rộng của 2 cột.[cite: 1]", ans: true },
+          { text: "Nếu muốn gộp ô theo chiều dọc (chiều cao của 2 dòng), học sinh cần thay thế colspan='2' bằng rowspan='2'.[cite: 1]", ans: true },
+          { text: "Nếu thay thế thẻ <th> bằng thẻ <td>, văn bản 'Buổi sáng' vẫn giữ nguyên định dạng in đậm và căn giữa tự động.[cite: 1]", ans: false }
+        ]
+      }
+    ];
+
+    function shuffleArray(arr) {
+      const copy = [...arr];
+      for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
+    }
+
+    let studentInfo = {};
+    let shuffledPart1 = [];
+    let peer = null;
+    let peerConn = null;
+    let localStream = null;
+    let violations = 0;
+    let penaltyScore = 0.0;
+    let startTime = null;
+    let timerInterval = null;
+    let isExamActive = false;
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const paramClass = urlParams.get('class');
+      if (paramClass && EXAM_CLASSES.includes(paramClass)) {
+        const selClass = document.getElementById('inpClass');
+        selClass.value = paramClass;
+        autoLoadStudentExcel(paramClass);
+      }
+    });
+
+    async function autoLoadStudentExcel(className) {
+      const selectElem = document.getElementById('studentSelect');
+      const statusElem = document.getElementById('excelLoadingStatus');
+      const btnStart = document.getElementById('btnStart');
+
+      selectElem.innerHTML = '<option value="" disabled selected>Đang đọc file danh sách học sinh...</option>';
+      selectElem.disabled = true;
+      btnStart.disabled = true;
+      statusElem.innerText = `Đang nạp file ${className}.xlsx...[cite: 1]`;
+      statusElem.className = "text-[10px] text-indigo-600 italic";
+
+      try {
+        const response = await fetch(`./${className}.xlsx`);
+        if (!response.ok) throw new Error(`Không tìm thấy file ${className}.xlsx cùng thư mục!`);
+        
+        const arrayBuffer = await response.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rawJson = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+        let headerRowIdx = 0, sttColIdx = 0, nameColIdx = 1;
+
+        for (let r = 0; r < Math.min(rawJson.length, 5); r++) {
+          const row = rawJson[r];
+          if (row && Array.isArray(row)) {
+            const rowStr = row.map(c => String(c).toLowerCase());
+            const sIdx = rowStr.findIndex(c => c.includes('stt') || c.includes('số'));
+            const nIdx = rowStr.findIndex(c => c.includes('tên') || c.includes('họ') || c.includes('name'));
+            if (sIdx !== -1 && nIdx !== -1) {
+              headerRowIdx = r + 1;
+              sttColIdx = sIdx;
+              nameColIdx = nIdx;
+              break;
+            }
+          }
+        }
+
+        const students = [];
+        for (let r = headerRowIdx; r < rawJson.length; r++) {
+          const row = rawJson[r];
+          if (row && row[nameColIdx]) {
+            const sttVal = row[sttColIdx] ? String(row[sttColIdx]).trim() : String(students.length + 1);
+            const nameVal = String(row[nameColIdx]).trim();
+            if (nameVal && nameVal.toLowerCase() !== 'họ và tên') {
+              students.push({ stt: sttVal, name: nameVal });
+            }
+          }
+        }
+
+        if (students.length === 0) throw new Error("File Excel không có dữ liệu!");
+
+        selectElem.innerHTML = '<option value="" disabled selected>-- Bấm để chọn tên em --[cite: 1]</option>';
+        students.forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = JSON.stringify({ stt: s.stt, name: s.name, className: className });
+          opt.innerText = `${s.stt}. ${s.name}`;
+          selectElem.appendChild(opt);
+        });
+
+        selectElem.disabled = false;
+        selectElem.onchange = () => { btnStart.disabled = false; };
+        statusElem.innerText = `Đã nạp ${students.length} học sinh thành công!`;
+        statusElem.className = "text-[10px] text-emerald-600 font-bold";
+
+      } catch (err) {
+        statusElem.innerText = `Lỗi: ${err.message}`;
+        statusElem.className = "text-[10px] text-rose-600 font-bold";
+        alert("Lưu ý: " + err.message + "\nHãy đảm bảo tệp " + className + ".xlsx nằm cùng thư mục với trang web.");
+      }
+    }
+
+    // BẮT THOÁT TAB & TRỪ ĐIỂM
+    function registerViolation() {
+      if (!isExamActive) return;
+      violations++;
+      penaltyScore = violations * 0.5;
+
+      document.getElementById('violationBadge').innerText = `${violations} lỗi (-${penaltyScore.toFixed(1)}đ)[cite: 1]`;
+      document.getElementById('penaltyDisplay').innerText = `-${penaltyScore.toFixed(1)} đ[cite: 1]`;
+      document.getElementById('violationCountText').innerText = `Số lần vi phạm: ${violations}/3 (Đã bị trừ ${penaltyScore.toFixed(1)} điểm)[cite: 1]`;
+      document.getElementById('violationAlertBox').classList.remove('hidden');
+
+      if (peerConn && peerConn.open) {
+        peerConn.send({
+          type: 'violation',
+          stt: studentInfo.stt,
+          className: studentInfo.className,
+          violations: violations,
+          penaltyScore: penaltyScore
+        });
+      }
+
+      if (violations >= 3) {
+        alert("Em đã vi phạm quy chế rời phòng thi quá 3 lần! Hệ thống tự động khóa và nộp bài.");
+        dismissViolationAlert();
+        document.getElementById('examForm').dispatchEvent(new Event('submit'));
+      }
+    }
+
+    window.addEventListener('blur', registerViolation);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) registerViolation();
+    });
+
+    function dismissViolationAlert() {
+      document.getElementById('violationAlertBox').classList.add('hidden');
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    }
+
+    async function handleStartExam(e) {
+      e.preventDefault();
+      const selVal = document.getElementById('studentSelect').value;
+      if (!selVal) {
+        alert("Vui lòng chọn tên của em trong danh sách!");
+        return;
+      }
+      studentInfo = JSON.parse(selVal);
+
+      try {
+        if (document.documentElement.requestFullscreen) {
+          await document.documentElement.requestFullscreen();
+        }
+      } catch (err) {
+        console.warn("Fullscreen bị chặn");
+      }
+
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia(OPTIMIZED_VIDEO_CONSTRAINTS);
+        document.getElementById('localVideo').srcObject = localStream;
+        document.getElementById('camStatus').innerText = "Camera: Bật (QVGA P2P)";
+      } catch (err) {
+        alert("Lỗi: Vui lòng bấm 'Cho phép' mở Webcam/Camera để tham gia bài thi!");
+        return;
+      }
+
+      initPeerConnection();
+
+      const examCode = 100 + Math.floor(Math.random() * 8) + 1;
+      document.getElementById('dispExamCode').innerText = examCode;
+      document.getElementById('dispStudentTitle').innerText = `${studentInfo.stt}. ${studentInfo.name} - Lớp ${studentInfo.className}[cite: 1]`;
+
+      renderShuffledExam();
+      updateLivePreview();
+
+      document.getElementById('loginScreen').classList.add('hidden');
+      document.getElementById('examScreen').classList.remove('hidden');
+      startTime = new Date();
+      isExamActive = true;
+      startCountdown(45 * 60);
+    }
+
+    function initPeerConnection() {
+      const studentPeerId = `thptbt-${studentInfo.className.toLowerCase()}-${studentInfo.stt}`;
+      peer = new Peer(studentPeerId, {
+        config: APP_RTC_CONFIG,
+        debug: 1
+      });
+
+      peer.on('open', (id) => {
+        console.log('Peer của học sinh sẵn sàng:', id);
+        connectAndCallTeacher();
+      });
+
+      peer.on('error', (err) => {
+        console.warn('Lỗi Peer học sinh, thử lại sau 2.5s...', err);
+        setTimeout(connectAndCallTeacher, 2500);
+      });
+    }
+
+    function connectAndCallTeacher() {
+      if (!peer || !localStream) return;
+      
+      peer.call(TEACHER_ROOM_ID, localStream, {
+        metadata: { stt: studentInfo.stt, name: studentInfo.name, className: studentInfo.className }
+      });
+
+      peerConn = peer.connect(TEACHER_ROOM_ID);
+      if (peerConn) {
+        peerConn.on('open', () => {
+          peerConn.send({ type: 'join', stt: studentInfo.stt, name: studentInfo.name, className: studentInfo.className });
+        });
+
+        // Nhận tin nhắc nhở từ giám thị
+        peerConn.on('data', (data) => {
+          if (data.type === 'warning_msg') {
+            document.getElementById('teacherNoticeContent').innerText = data.message;
+            document.getElementById('teacherNoticeBox').classList.remove('hidden');
+          }
+        });
+      }
+    }
+
+    function renderShuffledExam() {
+      shuffledPart1 = RAW_PART1.map((item, idx) => {
+        const optsWithAns = item.opts.map((optText, oIdx) => ({
+          text: optText,
+          isCorrect: oIdx === item.ans
+        }));
+        const shuffledOpts = shuffleArray(optsWithAns);
+        return { originalIndex: idx, q: item.q, opts: shuffledOpts };
+      });
+      shuffledPart1 = shuffleArray(shuffledPart1);
+
+      const p1Box = document.getElementById('part1Container');
+      p1Box.innerHTML = '';
+      shuffledPart1.forEach((item, qIdx) => {
+        const div = document.createElement('div');
+        div.className = "p-3.5 bg-slate-50 rounded-xl border border-slate-200";
+
+        const pQ = document.createElement('p');
+        pQ.className = "text-xs font-bold text-slate-800 mb-2";
+        pQ.innerHTML = `Câu ${qIdx + 1}: ${escapeHTML(item.q)}`;
+        div.appendChild(pQ);
+
+        const gridDiv = document.createElement('div');
+        gridDiv.className = "grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs";
+
+        item.opts.forEach((opt, oIdx) => {
+          const letter = String.fromCharCode(65 + oIdx);
+          const label = document.createElement('label');
+          label.className = "flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 hover:bg-indigo-50 cursor-pointer";
+
+          const radio = document.createElement('input');
+          radio.type = "radio";
+          radio.name = `p1_q${qIdx}`;
+          radio.value = oIdx;
+          radio.required = true;
+          radio.className = "text-indigo-600";
+
+          const spanText = document.createElement('span');
+          spanText.innerHTML = `<strong>${letter}.</strong> ${escapeHTML(opt.text)}`;
+
+          label.appendChild(radio);
+          label.appendChild(spanText);
+          gridDiv.appendChild(label);
+        });
+
+        div.appendChild(gridDiv);
+        p1Box.appendChild(div);
+      });
+
+      const p2Box = document.getElementById('part2Container');
+      p2Box.innerHTML = '';
+      RAW_PART2.forEach((qGroup, gIdx) => {
+        const div = document.createElement('div');
+        div.className = "p-3.5 bg-slate-50 rounded-xl border border-slate-200";
+
+        const pTitle = document.createElement('p');
+        pTitle.className = "text-xs font-bold text-slate-800 mb-1";
+        pTitle.innerText = `Câu ${20 + gIdx}: Đọc đoạn mã sau và chọn Đúng hoặc Sai cho mỗi ý a, b, c, d:[cite: 1]`;
+        div.appendChild(pTitle);
+
+        const preCode = document.createElement('pre');
+        preCode.className = "text-[11px] font-mono p-2 bg-slate-900 text-indigo-300 rounded mb-2 whitespace-pre-wrap";
+        preCode.innerText = qGroup.code;
+        div.appendChild(preCode);
+
+        const subList = document.createElement('div');
+        subList.className = "space-y-1.5 text-xs";
+
+        qGroup.subQ.forEach((sub, sIdx) => {
+          const letterSub = String.fromCharCode(97 + sIdx);
+          const itemDiv = document.createElement('div');
+          itemDiv.className = "flex justify-between items-center bg-white p-2 rounded border";
+
+          const textSpan = document.createElement('span');
+          textSpan.className = "pr-2";
+          textSpan.innerHTML = `<strong>${letterSub})</strong> ${escapeHTML(sub.text)}`;
+
+          const actionDiv = document.createElement('div');
+          actionDiv.className = "flex gap-3 font-bold";
+          actionDiv.innerHTML = `
+            <label class="flex items-center gap-1 cursor-pointer">
+              <input type="radio" name="p2_g${gIdx}_s${sIdx}" value="true" required> Đúng[cite: 1]
+            </label>
+            <label class="flex items-center gap-1 cursor-pointer">
+              <input type="radio" name="p2_g${gIdx}_s${sIdx}" value="false" required> Sai[cite: 1]
+            </label>
+          `;
+
+          itemDiv.appendChild(textSpan);
+          itemDiv.appendChild(actionDiv);
+          subList.appendChild(itemDiv);
+        });
+
+        div.appendChild(subList);
+        p2Box.appendChild(div);
+      });
+    }
+
+    function startCountdown(duration) {
+      let timer = duration;
+      timerInterval = setInterval(() => {
+        const mins = String(Math.floor(timer / 60)).padStart(2, '0');
+        const secs = String(timer % 60).padStart(2, '0');
+        document.getElementById('timerDisplay').innerText = `${mins}:${secs}`;
+        if (--timer < 0) {
+          clearInterval(timerInterval);
+          alert("Đã hết 45 phút! Hệ thống tự động nộp bài.");
+          document.getElementById('examForm').dispatchEvent(new Event('submit'));
+        }
+      }, 1000);
+    }
+
+    function handleSubmitExam(e) {
+      e.preventDefault();
+      isExamActive = false;
+      clearInterval(timerInterval);
+      const submitTime = new Date();
+
+      if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+
+      // 1. Chấm trắc nghiệm Phần I
+      let p1Correct = 0;
+      const studentP1Selections = [];
+      shuffledPart1.forEach((qItem, qIdx) => {
+        const selVal = document.querySelector(`input[name="p1_q${qIdx}"]:checked`)?.value;
+        const selectedOptIndex = parseInt(selVal);
+        studentP1Selections.push(selectedOptIndex);
+        if (qItem.opts[selectedOptIndex]?.isCorrect) {
+          p1Correct++;
+        }
+      });
+      const p1Score = p1Correct * 0.25;
+
+      // 2. Chấm Đúng / Sai Phần II
+      let p2Score = 0;
+      RAW_PART2.forEach((gItem, gIdx) => {
+        let correctSubCount = 0;
+        gItem.subQ.forEach((sub, sIdx) => {
+          const val = document.querySelector(`input[name="p2_g${gIdx}_s${sIdx}"]:checked`)?.value === "true";
+          if (val === sub.ans) correctSubCount++;
+        });
+        if (correctSubCount === 1) p2Score += 0.1;
+        else if (correctSubCount === 2) p2Score += 0.25;
+        else if (correctSubCount === 3) p2Score += 0.5;
+        else if (correctSubCount === 4) p2Score += 1.0;
+      });
+
+      // 3. Chấm Phần III Thực hành HTML bằng DOM Parser
+      const practicalCode = document.getElementById('practicalCode').value;
+      const evalResult = evaluatePracticalHTML(practicalCode);
+      const practicalScore = evalResult.score;
+
+      const rawScore = p1Score + p2Score + practicalScore;
+      const penalty = violations * 0.5;
+      const finalScore = Math.max(0, rawScore - penalty).toFixed(2);
+
+      // Gửi toàn bộ điểm chi tiết về máy giáo viên
+      if (peerConn && peerConn.open) {
+        peerConn.send({
+          type: 'submit',
+          stt: studentInfo.stt,
+          name: studentInfo.name,
+          className: studentInfo.className,
+          startTime: startTime.toLocaleTimeString('vi-VN'),
+          submitTime: submitTime.toLocaleTimeString('vi-VN'),
+          score: finalScore,
+          rawScore: rawScore.toFixed(2),
+          practicalScore: practicalScore.toFixed(2),
+          penalty: penalty.toFixed(1),
+          violations: violations
+        });
+      }
+
+      // Hiển thị kết quả lên màn hình
+      document.getElementById('p12ScoreDisplay').innerText = `${(p1Score + p2Score).toFixed(2)} đ`;
+      document.getElementById('practicalScoreDisplay').innerText = `${practicalScore.toFixed(2)} đ`;
+      document.getElementById('penaltyScoreDisplay').innerText = `-${penalty.toFixed(1)} đ[cite: 1]`;
+      document.getElementById('finalScoreDisplay').innerText = `${finalScore} đ[cite: 1]`;
+
+      const auditBox = document.getElementById('practicalAuditBox');
+      auditBox.innerHTML = `<strong>Chi tiết chấm phần thực hành (Tối đa 3.25đ):</strong><br>` + evalResult.breakdown.join('<br>');
+
+      // Đưa dữ liệu vào phiếu in chuẩn Bộ GD&ĐT
+      document.getElementById('printName').innerText = studentInfo.name;
+      document.getElementById('printClass').innerText = studentInfo.className;
+      document.getElementById('printSTT').innerText = studentInfo.stt;
+      document.getElementById('printSubmitTime').innerText = submitTime.toLocaleTimeString('vi-VN');
+      document.getElementById('printPracticalCode').innerText = practicalCode;
+
+      const bubbleBox = document.getElementById('printBubbleGrid');
+      bubbleBox.innerHTML = '';
+      for (let i = 0; i < 19; i++) {
+        const sel = studentP1Selections[i];
+        const row = document.createElement('div');
+        row.className = "flex items-center justify-between border-b py-0.5";
+        row.innerHTML = `
+          <span class="w-12 font-bold">Câu ${i + 1}:[cite: 1]</span>
+          <div>
+            ${['A','B','C','D'].map((letter, lIdx) => `
+              <span class="bubble ${sel === lIdx ? 'filled' : ''}">${letter}</span>
+            `).join('')}
+          </div>
+        `;
+        bubbleBox.appendChild(row);
+      }
+
+      document.getElementById('examScreen').classList.add('hidden');
+      document.getElementById('camBox').classList.add('hidden');
+      document.getElementById('resultScreen').classList.remove('hidden');
+    }
+  </script>
+</body>
+</html>
